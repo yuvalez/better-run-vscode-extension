@@ -1,5 +1,9 @@
 # Better Run
 
+<div align="center">
+  <img src="media/icon.png" alt="Better Run Extension Logo" width="128">
+</div>
+
 **Better Run** is a VS Code/Cursor extension that organizes and manages debug launches and tasks from multiple sources in a unified tree view. It helps you quickly access and run configurations from workspace files, user settings, and more.
 
 ## Features
