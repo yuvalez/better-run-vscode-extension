@@ -4,6 +4,14 @@
   "description": "Organize and run debug launches and tasks from multiple sources.",
   "version": "0.0.1",
   "publisher": "yuvalezuz",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yuvalez/better-run-vscode-extension.git"
+  },
+  "homepage": "https://github.com/yuvalez/better-run-vscode-extension",
+  "bugs": {
+    "url": "https://github.com/yuvalez/better-run-vscode-extension/issues"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -132,7 +140,6 @@
             }
           }
         },
-
         "betterRun.taskCategoryByLabel": {
           "type": "object",
           "default": {},

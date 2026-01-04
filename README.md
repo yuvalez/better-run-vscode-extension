@@ -318,7 +318,7 @@ Tasks are categorized using the following priority:
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/yuvalez/better-run-vscode-extension
    cd better-run
    ```
 
