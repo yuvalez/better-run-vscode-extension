@@ -4,6 +4,8 @@
   <img src="media/icon.png" alt="Better Run Extension Logo" width="128">
 </div>
 
+> **Note**: If the icon doesn't show up, reload the window (`Cmd+R` on macOS, `Ctrl+R` on Windows/Linux, or use the Command Palette: "Developer: Reload Window").
+
 **Better Run** is a VS Code/Cursor extension that organizes and manages debug launches and tasks from multiple sources in a unified tree view. It helps you quickly access and run configurations from workspace files, user settings, and more.
 
 ## Features
