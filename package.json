@@ -1,0 +1,212 @@
+{
+  "name": "better-run",
+  "displayName": "Better Run",
+  "description": "Organize and run debug launches and tasks from multiple sources.",
+  "version": "0.0.1",
+  "publisher": "yuvalezuz",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:betterRun.runs"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "keybindings": [
+      {
+        "command": "betterRun.collapseAll",
+        "key": "cmd+shift+\\",
+        "when": "view == betterRun.runs"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "betterRun",
+          "title": "Better Run",
+          "icon": "media/better-run.svg"
+        }
+      ]
+    },
+    "views": {
+      "betterRun": [
+        {
+          "id": "betterRun.runs",
+          "name": "Runs"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "betterRun.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "betterRun.searchByName",
+        "title": "Search",
+        "icon": "$(search)"
+      },
+      {
+        "command": "betterRun.clearSearch",
+        "title": "Clear",
+        "icon": "$(close)"
+      },
+      {
+        "command": "betterRun.runLaunch",
+        "title": "Run",
+        "icon": "$(play)",
+        "category": "Better Run"
+      },
+      {
+        "command": "betterRun.debugLaunch",
+        "title": "Debug",
+        "icon": "$(debug-alt)",
+        "category": "Better Run"
+      },
+      {
+        "command": "betterRun.runTask",
+        "title": "Run Task",
+        "icon": "$(checklist)",
+        "category": "Better Run"
+      },
+      {
+        "command": "betterRun.collapseAll",
+        "title": "Collapse All",
+        "icon": "$(collapse-all)",
+        "category": "Better Run"
+      }
+    ],
+    "configuration": {
+      "title": "Better Run",
+      "properties": {
+        "betterRun.userLaunches": {
+          "type": "array",
+          "default": [],
+          "description": "Launch configurations stored in user settings.json (Cursor/VS Code).",
+          "items": {
+            "type": "object"
+          }
+        },
+        "betterRun.userTasks": {
+          "type": "array",
+          "default": [],
+          "description": "Tasks stored in user settings.json (Cursor/VS Code). Each item should include label, command, and optional category.",
+          "items": {
+            "type": "object"
+          }
+        },
+        "betterRun.taskCategoryRules": {
+          "type": "array",
+          "default": [
+            {
+              "category": "Alembic",
+              "pattern": "\\balembic\\b"
+            },
+            {
+              "category": "Tests",
+              "pattern": "\\b(test|tests|pytest|unittest|nose)\\b"
+            },
+            {
+              "category": "Code Quality",
+              "pattern": "\\b(mypy|ruff|flake8|pylint|black|isort)\\b"
+            }
+          ],
+          "description": "Rules to assign a category to tasks based on their label. First match wins.",
+          "items": {
+            "type": "object",
+            "required": [
+              "category",
+              "pattern"
+            ],
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            }
+          }
+        },
+
+        "betterRun.taskCategoryByLabel": {
+          "type": "object",
+          "default": {},
+          "description": "Exact label -> category mapping. Takes precedence over taskCategoryRules.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "betterRun.refresh",
+          "when": "view == betterRun.runs",
+          "group": "navigation"
+        },
+        {
+          "command": "betterRun.searchByName",
+          "when": "view == betterRun.runs",
+          "group": "navigation"
+        },
+        {
+          "command": "betterRun.clearSearch",
+          "when": "view == betterRun.runs",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "betterRun.debugLaunch",
+          "when": "view == betterRun.runs && viewItem == betterRun.launch",
+          "group": "inline"
+        },
+        {
+          "command": "betterRun.runLaunch",
+          "when": "view == betterRun.runs && viewItem == betterRun.launch",
+          "group": "inline"
+        },
+        {
+          "command": "betterRun.runTask",
+          "when": "view == betterRun.runs && viewItem == betterRun.task",
+          "group": "inline"
+        },
+        {
+          "command": "betterRun.refresh",
+          "when": "view == betterRun.runs",
+          "group": "navigation"
+        },
+        {
+          "command": "betterRun.searchByName",
+          "when": "view == betterRun.runs",
+          "group": "navigation"
+        },
+        {
+          "command": "betterRun.clearSearch",
+          "when": "view == betterRun.runs",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.5.4",
+    "vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
+  }
+}
