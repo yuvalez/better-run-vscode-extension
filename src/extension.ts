@@ -386,8 +386,9 @@ export function activate(context: vscode.ExtensionContext) {
       if (!item?.uri) return;
 
       try {
-        const document = await vscode.workspace.openTextDocument(item.uri);
-        await vscode.window.showTextDocument(document, { preview: false });
+        // Open notebook in the default notebook editor
+        const notebook = await vscode.workspace.openNotebookDocument(item.uri);
+        await vscode.window.showNotebookDocument(notebook, { preview: false });
       } catch (error) {
         vscode.window.showErrorMessage(`Failed to open notebook: ${item.name}`);
       }

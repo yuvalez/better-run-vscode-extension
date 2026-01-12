@@ -396,11 +396,11 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const isRunning = this.runningLaunches.has(element.item.id);
         item.iconPath = isRunning 
           ? new vscode.ThemeIcon("loading~spin")
-          : new vscode.ThemeIcon("symbol-event"); // Neutral icon that doesn't suggest clickability
-        // Don't set command - clicking should not trigger, only the inline buttons should
+          : new vscode.ThemeIcon("debug-start");
+        // Don't set command - clicking should not trigger, only the buttons should
         item.tooltip = isRunning 
           ? `Debugging: ${element.item.name}` 
-          : `${element.item.name}\nUse the buttons on the right to Debug/Run`;
+          : `${element.item.name}\nRight-click for Debug/Run options`;
         return item;
       }
 
@@ -418,11 +418,12 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const isRunning = this.runningTasks.has(element.item.id);
         item.iconPath = isRunning 
           ? new vscode.ThemeIcon("loading~spin")
-          : new vscode.ThemeIcon("symbol-method"); // Neutral icon that doesn't suggest clickability
-        // Don't set command - clicking should not trigger, only the inline button should
+          : new vscode.ThemeIcon("play");
+        // Allow clicking on the play icon to run the task
+        item.command = { command: "betterRun.runTask", title: "Run Task", arguments: [element.item] };
         item.tooltip = isRunning 
           ? `Running: ${element.item.label}` 
-          : `${element.item.label}\nUse the button on the right to Run`;
+          : `Click to run "${element.item.label}"`;
         return item;
       }
 
@@ -432,11 +433,12 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const isRunning = this.runningTasks.has(element.item.id);
         item.iconPath = isRunning 
           ? new vscode.ThemeIcon("loading~spin")
-          : new vscode.ThemeIcon("symbol-method"); // Neutral icon that doesn't suggest clickability
-        // Don't set command - clicking should not trigger, only the inline button should
+          : new vscode.ThemeIcon("play");
+        // Allow clicking on the play icon to run the task
+        item.command = { command: "betterRun.runTask", title: "Run Task", arguments: [element.item] };
         item.tooltip = isRunning 
           ? `Running: ${element.item.label}` 
-          : `${element.item.label}\nUse the button on the right to Run`;
+          : `Click to run "${element.item.label}"`;
         return item;
       }
 
