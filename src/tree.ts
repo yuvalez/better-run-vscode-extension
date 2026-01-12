@@ -1,6 +1,11 @@
 import * as vscode from "vscode";
-import { loadLaunchesAndTasks, LaunchItem, TaskItem, SourceRef } from "./sources";
+import { loadLaunchesAndTasks, LaunchItem, TaskItem, NotebookItem, SourceRef } from "./sources";
 import { Storage } from "./storage";
+
+// Helper to get output channel for debugging
+function getOutputChannel(): vscode.OutputChannel {
+  return vscode.window.createOutputChannel("Better Run");
+}
 
 type WorkspaceNode = {
   kind: "workspace";
@@ -11,14 +16,15 @@ type WorkspaceNode = {
 
 type Node =
   | WorkspaceNode
-  | { kind: "section"; workspaceKey: string; section: "Launches" | "Tasks" }
+  | { kind: "section"; workspaceKey: string; section: "Launches" | "Tasks" | "Notebooks" }
   | { kind: "launchCategory"; workspaceKey: string; category: string }
   | { kind: "launchSource"; workspaceKey: string; sourceId: string; sourceLabel: string }
   | { kind: "launchTop"; item: LaunchItem }
   | { kind: "launch"; item: LaunchItem }
   | { kind: "taskCategory"; workspaceKey: string; category: string }
   | { kind: "taskTop"; item: TaskItem }
-  | { kind: "task"; item: TaskItem };
+  | { kind: "task"; item: TaskItem }
+  | { kind: "notebook"; item: NotebookItem };
 
 const USER_WORKSPACE_KEY = "ws::user";
 
@@ -62,6 +68,9 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
   // workspaceKey -> category -> sources[]
   private taskSourcesByWorkspaceCategory: Map<string, Map<string, SourceRef[]>> = new Map();
 
+  // workspaceKey -> notebooks[]
+  private notebooksByWorkspace: Map<string, NotebookItem[]> = new Map();
+
   // Track running launches and tasks for loading state
   private runningLaunches: Set<string> = new Set(); // launch id
   private runningTasks: Set<string> = new Set(); // task id
@@ -104,7 +113,10 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
       )
     );
 
-    return hasLaunchMatch || hasTaskMatch;
+    const notebooks = this.notebooksByWorkspace.get(workspaceKey) ?? [];
+    const hasNotebookMatch = notebooks.some((n: NotebookItem) => n.name.toLowerCase().includes(filterLower));
+
+    return hasLaunchMatch || hasTaskMatch || hasNotebookMatch;
   }
 
   private workspaceHasLaunchMatches(workspaceKey: string, filterLower: string): boolean {
@@ -141,7 +153,7 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
   }
 
   async refresh(): Promise<void> {
-    const { launchSources, launches, taskSources, tasks } = await loadLaunchesAndTasks();
+    const { launchSources, launches, taskSources, tasks, notebooks } = await loadLaunchesAndTasks();
 
     // Workspaces (plus optional User)
     const ws: WorkspaceNode[] = (vscode.workspace.workspaceFolders ?? []).map((wf) => ({
@@ -151,10 +163,30 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
       workspaceFolder: wf,
     }));
 
-    const hasUser = launchSources.some((s) => !s.workspaceFolder) || taskSources.some((s) => !s.workspaceFolder);
+    const hasUser = launchSources.some((s) => !s.workspaceFolder) || taskSources.some((s) => !s.workspaceFolder) || notebooks.some((n) => n.isLocal);
     this.workspaces = [...ws];
     if (hasUser) {
       this.workspaces.push({ kind: "workspace", key: USER_WORKSPACE_KEY, name: "Local" });
+    }
+
+    // Organize notebooks by workspace
+    this.notebooksByWorkspace.clear();
+    for (const nb of notebooks) {
+      // Local notebooks go to USER_WORKSPACE_KEY, others to their workspace folder
+      const wk = nb.isLocal ? USER_WORKSPACE_KEY : workspaceKeyFromFolder(nb.workspaceFolder);
+      const arr = this.notebooksByWorkspace.get(wk) ?? [];
+      arr.push(nb);
+      this.notebooksByWorkspace.set(wk, arr);
+    }
+    for (const [wk, arr] of this.notebooksByWorkspace.entries()) {
+      arr.sort((a: NotebookItem, b: NotebookItem) => a.name.localeCompare(b.name));
+      this.notebooksByWorkspace.set(wk, arr);
+    }
+    
+    // Debug: log notebook organization
+    const outputChannel = vscode.window.createOutputChannel("Better Run");
+    for (const [wk, arr] of this.notebooksByWorkspace.entries()) {
+      outputChannel.appendLine(`Better Run: Workspace ${wk} has ${arr.length} notebooks`);
     }
 
     // Launches: workspace -> category -> source -> items (similar to tasks)
@@ -364,11 +396,11 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const isRunning = this.runningLaunches.has(element.item.id);
         item.iconPath = isRunning 
           ? new vscode.ThemeIcon("loading~spin")
-          : new vscode.ThemeIcon("debug-start");
-        // Don't set command - clicking should not trigger, only the buttons should
+          : new vscode.ThemeIcon("symbol-event"); // Neutral icon that doesn't suggest clickability
+        // Don't set command - clicking should not trigger, only the inline buttons should
         item.tooltip = isRunning 
           ? `Debugging: ${element.item.name}` 
-          : `${element.item.name}\nRight-click for Debug/Run options`;
+          : `${element.item.name}\nUse the buttons on the right to Debug/Run`;
         return item;
       }
 
@@ -386,12 +418,11 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const isRunning = this.runningTasks.has(element.item.id);
         item.iconPath = isRunning 
           ? new vscode.ThemeIcon("loading~spin")
-          : new vscode.ThemeIcon("play");
-        // Allow clicking on the play icon to run the task
-        item.command = { command: "betterRun.runTask", title: "Run Task", arguments: [element.item] };
+          : new vscode.ThemeIcon("symbol-method"); // Neutral icon that doesn't suggest clickability
+        // Don't set command - clicking should not trigger, only the inline button should
         item.tooltip = isRunning 
           ? `Running: ${element.item.label}` 
-          : `Click to run "${element.item.label}"`;
+          : `${element.item.label}\nUse the button on the right to Run`;
         return item;
       }
 
@@ -401,12 +432,22 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const isRunning = this.runningTasks.has(element.item.id);
         item.iconPath = isRunning 
           ? new vscode.ThemeIcon("loading~spin")
-          : new vscode.ThemeIcon("play");
-        // Allow clicking on the play icon to run the task
-        item.command = { command: "betterRun.runTask", title: "Run Task", arguments: [element.item] };
+          : new vscode.ThemeIcon("symbol-method"); // Neutral icon that doesn't suggest clickability
+        // Don't set command - clicking should not trigger, only the inline button should
         item.tooltip = isRunning 
           ? `Running: ${element.item.label}` 
-          : `Click to run "${element.item.label}"`;
+          : `${element.item.label}\nUse the button on the right to Run`;
+        return item;
+      }
+
+      case "notebook": {
+        const item = new vscode.TreeItem(element.item.name, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "betterRun.notebook";
+        item.iconPath = new vscode.ThemeIcon("notebook");
+        item.command = { command: "betterRun.openNotebook", title: "Open Notebook", arguments: [element.item] };
+        const location = element.item.isLocal ? "Local" : element.item.workspaceFolder?.name;
+        item.tooltip = `${element.item.name}\n${location ? `Location: ${location}` : ''}\nClick to open`;
+        item.resourceUri = element.item.uri;
         return item;
       }
     }
@@ -429,11 +470,18 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
       // If filter is set and this workspace has no matches, show nothing
       if (filter && !this.workspaceHasMatches(element.key, filter)) return [];
 
+      const workspaceNotebooks = this.notebooksByWorkspace.get(element.key) ?? [];
+      const hasNotebooks = workspaceNotebooks.length > 0;
+
       if (!filter) {
-        return [
+        const sections: Node[] = [
           { kind: "section", workspaceKey: element.key, section: "Launches" },
           { kind: "section", workspaceKey: element.key, section: "Tasks" },
         ];
+        if (hasNotebooks) {
+          sections.push({ kind: "section", workspaceKey: element.key, section: "Notebooks" });
+        }
+        return sections;
       }
 
       // Filter is active: only show sections that have matches
@@ -443,6 +491,10 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
       }
       if (this.workspaceHasTaskMatches(element.key, filter)) {
         out.push({ kind: "section", workspaceKey: element.key, section: "Tasks" });
+      }
+      const hasNotebookMatches = workspaceNotebooks.some((n: NotebookItem) => n.name.toLowerCase().includes(filter));
+      if (hasNotebookMatches) {
+        out.push({ kind: "section", workspaceKey: element.key, section: "Notebooks" });
       }
       return out;
     }
@@ -558,6 +610,19 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
     
       all.sort((a, b) => a.label.localeCompare(b.label));
       return all.map((t: TaskItem) => ({ kind: "task", item: t }));
+    }
+
+    // ---------- Notebooks ----------
+    if (element.kind === "section" && element.section === "Notebooks") {
+      const notebooks = this.notebooksByWorkspace.get(element.workspaceKey) ?? [];
+    
+      let filtered = notebooks;
+      if (filter) {
+        filtered = notebooks.filter((n: NotebookItem) => n.name.toLowerCase().includes(filter));
+      }
+    
+      filtered.sort((a, b) => a.name.localeCompare(b.name));
+      return filtered.map((n: NotebookItem) => ({ kind: "notebook", item: n }));
     }
 
     return [];

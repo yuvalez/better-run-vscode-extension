@@ -43,6 +43,14 @@ export interface TaskItem {
   source: SourceRef;
 }
 
+export interface NotebookItem {
+  id: string;
+  name: string;
+  uri: vscode.Uri;
+  workspaceFolder?: vscode.WorkspaceFolder;
+  isLocal?: boolean;
+}
+
 async function readJsonc(uri: vscode.Uri): Promise<any | undefined> {
   try {
     const bytes = await vscode.workspace.fs.readFile(uri);
@@ -51,6 +59,71 @@ async function readJsonc(uri: vscode.Uri): Promise<any | undefined> {
   } catch {
     return undefined;
   }
+}
+
+async function resolveNotebookPath(path: string, baseUri?: vscode.Uri): Promise<vscode.Uri | undefined> {
+  try {
+    // If path is absolute, use it directly
+    if (path.startsWith('/') || (process.platform === 'win32' && /^[A-Za-z]:/.test(path))) {
+      return vscode.Uri.file(path);
+    }
+    // If path is relative and we have a base URI, resolve relative to it
+    if (baseUri) {
+      return vscode.Uri.joinPath(baseUri, path);
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function loadNotebooksFromPath(notebookPath: string, workspaceFolder?: vscode.WorkspaceFolder, isLocal?: boolean): Promise<NotebookItem[]> {
+  const notebooks: NotebookItem[] = [];
+  try {
+    const baseUri = workspaceFolder?.uri;
+    const uri = await resolveNotebookPath(notebookPath, baseUri);
+    if (!uri) {
+      return notebooks;
+    }
+
+    const stat = await vscode.workspace.fs.stat(uri);
+    
+    // If it's a file and ends with .ipynb, add it directly
+    if (stat.type === vscode.FileType.File && uri.fsPath.endsWith('.ipynb')) {
+      const baseName = uri.fsPath.split(/[/\\]/).pop()?.replace(/\.ipynb$/, '') || 'notebook';
+      notebooks.push({
+        id: `notebook::${uri.toString()}`,
+        name: baseName,
+        uri: uri,
+        workspaceFolder,
+        isLocal,
+      });
+      return notebooks;
+    }
+    
+    // If it's a directory, search for .ipynb files in it (non-recursive)
+    if (stat.type === vscode.FileType.Directory) {
+      const entries = await vscode.workspace.fs.readDirectory(uri);
+      for (const [name, type] of entries) {
+        if (type === vscode.FileType.File && name.endsWith('.ipynb')) {
+          const notebookUri = vscode.Uri.joinPath(uri, name);
+          const baseName = name.replace(/\.ipynb$/, '');
+          notebooks.push({
+            id: `notebook::${notebookUri.toString()}`,
+            name: baseName,
+            uri: notebookUri,
+            workspaceFolder,
+            isLocal,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    // Ignore errors (path doesn't exist, permission denied, etc.)
+    const outputChannel = vscode.window.createOutputChannel("Better Run");
+    outputChannel.appendLine(`Better Run: Could not load notebook from path: ${notebookPath} - ${error}`);
+  }
+  return notebooks;
 }
 
 function getUserSettingsUris(): vscode.Uri[] {
@@ -137,12 +210,19 @@ export async function loadLaunchesAndTasks(): Promise<{
   launches: LaunchItem[];
   taskSources: SourceRef[];
   tasks: TaskItem[];
+  notebooks: NotebookItem[];
 }> {
   const cfg = vscode.workspace.getConfiguration("betterRun");
   const userLaunches = (cfg.get<any[]>("userLaunches") ?? []).filter(Boolean);
   const userTasks = (cfg.get<UserTaskSpec[]>("userTasks") ?? []).filter(Boolean);
   const rules = (cfg.get<CategoryRule[]>("taskCategoryRules") ?? []).filter(Boolean);
   const byLabel = (cfg.get<Record<string, string>>("taskCategoryByLabel") ?? {});
+  const userNotebookPaths = (cfg.get<string[]>("userNotebookPaths") ?? []).filter(Boolean);
+  
+  const outputChannel = vscode.window.createOutputChannel("Better Run");
+  if (userNotebookPaths.length > 0) {
+    outputChannel.appendLine(`Better Run: Found ${userNotebookPaths.length} user notebook paths`);
+  }
 
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
 
@@ -150,6 +230,7 @@ export async function loadLaunchesAndTasks(): Promise<{
   const taskSources: SourceRef[] = [];
   const launches: LaunchItem[] = [];
   const tasks: TaskItem[] = [];
+  const notebooks: NotebookItem[] = [];
 
   // Workspace launch.json
   for (const wf of workspaceFolders) {
@@ -279,6 +360,30 @@ export async function loadLaunchesAndTasks(): Promise<{
     }
   }
 
+  // Find notebooks from workspace notebooks.json files
+  for (const wf of workspaceFolders) {
+    const notebooksJsonUri = vscode.Uri.joinPath(wf.uri, ".vscode", "notebooks.json");
+    const notebooksJson = await readJsonc(notebooksJsonUri);
+    if (notebooksJson && Array.isArray(notebooksJson.paths)) {
+      outputChannel.appendLine(`Better Run: Found notebooks.json in ${wf.name} with ${notebooksJson.paths.length} paths`);
+      for (const path of notebooksJson.paths) {
+        if (typeof path === 'string' && path.trim()) {
+          const pathNotebooks = await loadNotebooksFromPath(path.trim(), wf, false);
+          notebooks.push(...pathNotebooks);
+        }
+      }
+    }
+  }
+
+  // Find notebooks from user settings paths
+  for (const path of userNotebookPaths) {
+    if (typeof path === 'string' && path.trim()) {
+      outputChannel.appendLine(`Better Run: Processing user notebook path: "${path.trim()}"`);
+      const pathNotebooks = await loadNotebooksFromPath(path.trim(), undefined, true);
+      notebooks.push(...pathNotebooks);
+    }
+  }
+
   launchSources.sort((a, b) => a.label.localeCompare(b.label));
   taskSources.sort((a, b) => a.label.localeCompare(b.label));
   launches.sort((a, b) => a.source.label.localeCompare(b.source.label) || a.name.localeCompare(b.name));
@@ -291,6 +396,7 @@ export async function loadLaunchesAndTasks(): Promise<{
       a.label.localeCompare(b.label)
     );
   });
+  notebooks.sort((a: NotebookItem, b: NotebookItem) => a.name.localeCompare(b.name));
 
-  return { launchSources, launches, taskSources, tasks };
+  return { launchSources, launches, taskSources, tasks, notebooks };
 }
