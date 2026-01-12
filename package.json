@@ -90,6 +90,12 @@
         "category": "Better Run"
       },
       {
+        "command": "betterRun.openNotebook",
+        "title": "Open Notebook",
+        "icon": "$(notebook)",
+        "category": "Better Run"
+      },
+      {
         "command": "betterRun.collapseAll",
         "title": "Collapse All",
         "icon": "$(collapse-all)",
@@ -153,6 +159,14 @@
           "default": {},
           "description": "Exact label -> category mapping. Takes precedence over taskCategoryRules.",
           "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "betterRun.userNotebookPaths": {
+          "type": "array",
+          "default": [],
+          "description": "Array of paths to Jupyter notebooks (.ipynb files) or directories containing notebooks. Paths can be absolute or relative to workspace. For workspace-specific notebooks, use .vscode/notebooks.json instead.",
+          "items": {
             "type": "string"
           }
         }

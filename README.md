@@ -303,6 +303,27 @@ Better Run discovers tasks from:
 1. **Workspace `tasks.json`**: Each workspace folder's `.vscode/tasks.json` file
 2. **User Settings**: Tasks defined in `betterRun.userTasks`
 
+### Notebook Sources
+
+Better Run discovers Jupyter notebooks from:
+
+1. **Workspace `notebooks.json`**: Each workspace folder's `.vscode/notebooks.json` file
+   - Create a `.vscode/notebooks.json` file in your workspace with a `paths` array
+   - Paths can be absolute or relative to the workspace root
+   - Paths can point to individual `.ipynb` files or directories containing notebooks
+   - Example:
+     ```json
+     {
+       "paths": [
+         "/absolute/path/to/notebook.ipynb",
+         "relative/path/to/notebook.ipynb",
+         "/absolute/path/to/notebooks/directory",
+         "relative/path/to/notebooks/directory"
+       ]
+     }
+     ```
+2. **User Settings**: Notebook paths defined in `betterRun.userNotebookPaths` (array of strings)
+
 ### Task Categorization
 
 Tasks are categorized using the following priority:

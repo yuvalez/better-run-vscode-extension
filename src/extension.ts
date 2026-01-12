@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { BetterRunTreeProvider } from "./tree";
-import type { LaunchItem, TaskItem } from "./sources";
+import type { LaunchItem, TaskItem, NotebookItem } from "./sources";
 import { Storage } from "./storage";
 
 
@@ -40,7 +40,14 @@ function unwrapTask(arg: unknown): TaskItem | undefined {
 
 const VIEW_ID = "betterRun.runs";
 
+// Create output channel for debugging
+let outputChannel: vscode.OutputChannel | undefined;
+
 export function activate(context: vscode.ExtensionContext) {
+  outputChannel = vscode.window.createOutputChannel("Better Run");
+  outputChannel.appendLine("Better Run extension activated");
+  context.subscriptions.push(outputChannel);
+  
   const storage = new Storage(context);
 
   const provider = new BetterRunTreeProvider(storage);
@@ -370,6 +377,29 @@ export function activate(context: vscode.ExtensionContext) {
           provider.setTaskRunning(item.id, false);
         }
       }, 60000);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("betterRun.openNotebook", async (arg: NotebookItem | { item: NotebookItem }) => {
+      const item = (arg && typeof arg === 'object' && 'uri' in arg) ? arg as NotebookItem : (arg as any)?.item;
+      if (!item?.uri) return;
+
+      try {
+        const document = await vscode.workspace.openTextDocument(item.uri);
+        await vscode.window.showTextDocument(document, { preview: false });
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to open notebook: ${item.name}`);
+      }
+    })
+  );
+
+  // Listen for configuration changes to refresh notebooks
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("betterRun.userNotebookPaths")) {
+        provider.refresh().catch(() => {});
+      }
     })
   );
 
