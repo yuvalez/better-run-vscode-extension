@@ -15,6 +15,7 @@ export interface SourceRef {
 export interface LaunchItem {
   id: string;
   name: string;
+  category?: string;
   config: any;
   workspaceFolder?: vscode.WorkspaceFolder;
   source: SourceRef;
@@ -94,6 +95,26 @@ function resolveTaskCategory(label: string, rules: CategoryRule[], byLabel: Reco
   return undefined; // <-- key change: no category means "top level"
 }
 
+function resolveLaunchCategory(name: string, rules: CategoryRule[], byLabel: Record<string, string>): string | undefined {
+  const exact = byLabel[name];
+  if (exact && exact.trim()) return exact.trim();
+
+  for (const r of rules) {
+    try {
+      const re = new RegExp(r.pattern, "i");
+      if (re.test(name)) return r.category;
+    } catch {
+      // ignore invalid regex
+    }
+  }
+
+  // Optional fallback: treat "X: ..." as category
+  const m = name.match(/^([^:]+):\s*/);
+  if (m?.[1]) return m[1].trim();
+
+  return undefined;
+}
+
 
 function categorizeTaskLabel(label: string, rules: CategoryRule[]): string {
   for (const r of rules) {
@@ -147,9 +168,16 @@ export async function loadLaunchesAndTasks(): Promise<{
       for (const c of json.configurations as any[]) {
         const name = String(c?.name ?? "").trim();
         if (!name) continue;
+        
+        // Resolve category: explicit category field, or pattern matching
+        const category = (c?.category && String(c.category).trim()) 
+          ? String(c.category).trim() 
+          : resolveLaunchCategory(name, rules, byLabel);
+        
         launches.push({
           id: `${source.id}::${name}`,
           name,
+          category,
           config: c,
           workspaceFolder: wf,
           source,
@@ -200,14 +228,21 @@ export async function loadLaunchesAndTasks(): Promise<{
         kind: "launches",
         isUserSettings: true,
       };
+      
       launchSources.push(source);
-
       for (const c of userLaunches) {
         const name = String(c?.name ?? "").trim();
         if (!name) continue;
+        
+        // Resolve category: explicit category field, or pattern matching
+        const category = (c?.category && String(c.category).trim()) 
+          ? String(c.category).trim() 
+          : resolveLaunchCategory(name, rules, byLabel);
+        
         launches.push({
           id: `${source.id}::${name}`,
           name,
+          category,
           config: c,
           source,
         });

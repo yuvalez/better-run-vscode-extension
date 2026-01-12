@@ -73,18 +73,20 @@
         "command": "betterRun.runLaunch",
         "title": "Run",
         "icon": "$(play)",
-        "category": "Better Run"
+        "category": "Better Run",
+        "enablement": "viewItem == betterRun.launch"
       },
       {
         "command": "betterRun.debugLaunch",
         "title": "Debug",
         "icon": "$(debug-alt)",
-        "category": "Better Run"
+        "category": "Better Run",
+        "enablement": "viewItem == betterRun.launch"
       },
       {
         "command": "betterRun.runTask",
         "title": "Run Task",
-        "icon": "$(checklist)",
+        "icon": "$(play)",
         "category": "Better Run"
       },
       {

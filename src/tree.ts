@@ -12,6 +12,9 @@ type WorkspaceNode = {
 type Node =
   | WorkspaceNode
   | { kind: "section"; workspaceKey: string; section: "Launches" | "Tasks" }
+  | { kind: "launchCategory"; workspaceKey: string; category: string }
+  | { kind: "launchSource"; workspaceKey: string; sourceId: string; sourceLabel: string }
+  | { kind: "launchTop"; item: LaunchItem }
   | { kind: "launch"; item: LaunchItem }
   | { kind: "taskCategory"; workspaceKey: string; category: string }
   | { kind: "taskTop"; item: TaskItem }
@@ -38,6 +41,18 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
   // workspaceKey -> sourceId -> launches[]
   private launchesByWorkspaceAndSource: Map<string, Map<string, LaunchItem[]>> = new Map();
 
+  // workspaceKey -> top-level launches (no category)
+  private topLevelLaunchesByWorkspace: Map<string, LaunchItem[]> = new Map();
+
+  // workspaceKey -> categories[]
+  private launchCategoriesByWorkspace: Map<string, string[]> = new Map();
+
+  // workspaceKey -> category -> sourceId -> launches[]
+  private launchesByWorkspaceCategorySource: Map<string, Map<string, Map<string, LaunchItem[]>>> = new Map();
+
+  // workspaceKey -> category -> sources[]
+  private launchSourcesByWorkspaceCategory: Map<string, Map<string, SourceRef[]>> = new Map();
+
   // workspaceKey -> categories[]
   private taskCategoriesByWorkspace: Map<string, string[]> = new Map();
 
@@ -47,7 +62,29 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
   // workspaceKey -> category -> sources[]
   private taskSourcesByWorkspaceCategory: Map<string, Map<string, SourceRef[]>> = new Map();
 
+  // Track running launches and tasks for loading state
+  private runningLaunches: Set<string> = new Set(); // launch id
+  private runningTasks: Set<string> = new Set(); // task id
+
   constructor(private readonly storage: Storage) {}
+
+  setLaunchRunning(launchId: string, running: boolean): void {
+    if (running) {
+      this.runningLaunches.add(launchId);
+    } else {
+      this.runningLaunches.delete(launchId);
+    }
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  setTaskRunning(taskId: string, running: boolean): void {
+    if (running) {
+      this.runningTasks.add(taskId);
+    } else {
+      this.runningTasks.delete(taskId);
+    }
+    this._onDidChangeTreeData.fire(undefined);
+  }
 
   private getFilterLower(): string {
     return this.storage.getNameFilter().trim().toLowerCase();
@@ -56,12 +93,7 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
   private workspaceHasMatches(workspaceKey: string, filterLower: string): boolean {
     if (!filterLower) return true;
 
-    const launchesBySrc: Map<string, LaunchItem[]> =
-      this.launchesByWorkspaceAndSource.get(workspaceKey) ?? new Map<string, LaunchItem[]>();
-
-    const hasLaunchMatch = Array.from(launchesBySrc.values()).some((arr: LaunchItem[]) =>
-      arr.some((i: LaunchItem) => i.name.toLowerCase().includes(filterLower))
-    );
+    const hasLaunchMatch = this.workspaceHasLaunchMatches(workspaceKey, filterLower);
 
     const catTasks: Map<string, Map<string, TaskItem[]>> =
       this.tasksByWorkspaceCategorySource.get(workspaceKey) ?? new Map<string, Map<string, TaskItem[]>>();
@@ -78,11 +110,20 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
   private workspaceHasLaunchMatches(workspaceKey: string, filterLower: string): boolean {
     if (!filterLower) return true;
 
-    const launchesBySrc: Map<string, LaunchItem[]> =
-      this.launchesByWorkspaceAndSource.get(workspaceKey) ?? new Map<string, LaunchItem[]>();
+    // Check top-level launches
+    const topLaunches = this.topLevelLaunchesByWorkspace.get(workspaceKey) ?? [];
+    if (topLaunches.some((i: LaunchItem) => i.name.toLowerCase().includes(filterLower))) {
+      return true;
+    }
 
-    return Array.from(launchesBySrc.values()).some((arr: LaunchItem[]) =>
-      arr.some((i: LaunchItem) => i.name.toLowerCase().includes(filterLower))
+    // Check categorized launches
+    const catLaunches: Map<string, Map<string, LaunchItem[]>> =
+      this.launchesByWorkspaceCategorySource.get(workspaceKey) ?? new Map<string, Map<string, LaunchItem[]>>();
+
+    return Array.from(catLaunches.values()).some((srcMap: Map<string, LaunchItem[]>) =>
+      Array.from(srcMap.values()).some((arr: LaunchItem[]) =>
+        arr.some((i: LaunchItem) => i.name.toLowerCase().includes(filterLower))
+      )
     );
   }
 
@@ -116,42 +157,84 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
       this.workspaces.push({ kind: "workspace", key: USER_WORKSPACE_KEY, name: "Local" });
     }
 
-    // Launches: workspace -> source -> items
+    // Launches: workspace -> category -> source -> items (similar to tasks)
     this.launchSourcesByWorkspace.clear();
     this.launchesByWorkspaceAndSource.clear();
+    this.topLevelLaunchesByWorkspace.clear();
+    this.launchCategoriesByWorkspace.clear();
+    this.launchesByWorkspaceCategorySource.clear();
+    this.launchSourcesByWorkspaceCategory.clear();
+
+    const launchCatsByWk: Map<string, Set<string>> = new Map();
+    const launchSourcesByWkCat: Map<string, Map<string, Map<string, SourceRef>>> = new Map();
+    const launchesByWkCatSource: Map<string, Map<string, Map<string, LaunchItem[]>>> = new Map();
 
     for (const source of launchSources) {
       const wk = workspaceKeyFromFolder(source.workspaceFolder);
-
       const list: SourceRef[] = this.launchSourcesByWorkspace.get(wk) ?? [];
       list.push(source);
       this.launchSourcesByWorkspace.set(wk, list);
-
-      const bySource: Map<string, LaunchItem[]> =
-        this.launchesByWorkspaceAndSource.get(wk) ?? new Map<string, LaunchItem[]>();
-      if (!bySource.has(source.id)) bySource.set(source.id, []);
-      this.launchesByWorkspaceAndSource.set(wk, bySource);
     }
 
     for (const l of launches) {
       const wk = workspaceKeyFromFolder(l.workspaceFolder);
-      const bySource: Map<string, LaunchItem[]> =
-        this.launchesByWorkspaceAndSource.get(wk) ?? new Map<string, LaunchItem[]>();
-      const arr: LaunchItem[] = bySource.get(l.source.id) ?? [];
-      arr.push(l);
-      bySource.set(l.source.id, arr);
-      this.launchesByWorkspaceAndSource.set(wk, bySource);
-    }
+      const category = (l.category && l.category.trim()) ? l.category.trim() : undefined;
 
-    for (const bySource of this.launchesByWorkspaceAndSource.values()) {
-      for (const arr of bySource.values()) {
-        arr.sort((a, b) => a.name.localeCompare(b.name));
+      if (!category) {
+        // Top-level launch (no category)
+        const arr = this.topLevelLaunchesByWorkspace.get(wk) ?? [];
+        arr.push(l);
+        this.topLevelLaunchesByWorkspace.set(wk, arr);
+        continue;
       }
+
+      // Categorized launch
+      if (!launchCatsByWk.has(wk)) launchCatsByWk.set(wk, new Set<string>());
+      launchCatsByWk.get(wk)!.add(category);
+
+      if (!launchSourcesByWkCat.has(wk)) launchSourcesByWkCat.set(wk, new Map<string, Map<string, SourceRef>>());
+      const catMap = launchSourcesByWkCat.get(wk)!;
+      if (!catMap.has(category)) catMap.set(category, new Map<string, SourceRef>());
+      catMap.get(category)!.set(l.source.id, l.source);
+
+      if (!launchesByWkCatSource.has(wk)) launchesByWkCatSource.set(wk, new Map<string, Map<string, LaunchItem[]>>());
+      const catLaunches = launchesByWkCatSource.get(wk)!;
+      if (!catLaunches.has(category)) catLaunches.set(category, new Map<string, LaunchItem[]>());
+      const srcLaunches = catLaunches.get(category)!;
+      if (!srcLaunches.has(l.source.id)) srcLaunches.set(l.source.id, []);
+      srcLaunches.get(l.source.id)!.push(l);
     }
 
-    for (const [wk, sources] of this.launchSourcesByWorkspace.entries()) {
-      sources.sort((a, b) => a.label.localeCompare(b.label));
-      this.launchSourcesByWorkspace.set(wk, sources);
+    // Sort top-level launches
+    for (const [wk, arr] of this.topLevelLaunchesByWorkspace.entries()) {
+      arr.sort((a, b) => a.name.localeCompare(b.name));
+      this.topLevelLaunchesByWorkspace.set(wk, arr);
+    }
+
+    // Sort categories
+    for (const [wk, set] of launchCatsByWk.entries()) {
+      const cats = Array.from(set).sort((a, b) => a.localeCompare(b));
+      this.launchCategoriesByWorkspace.set(wk, cats);
+    }
+
+    // Sort launches within categories
+    for (const [wk, catLaunches] of launchesByWkCatSource.entries()) {
+      for (const srcMap of catLaunches.values()) {
+        for (const arr of srcMap.values()) {
+          arr.sort((a, b) => a.name.localeCompare(b.name));
+        }
+      }
+      this.launchesByWorkspaceCategorySource.set(wk, catLaunches);
+    }
+
+    // Organize sources by category
+    for (const [wk, catMap] of launchSourcesByWkCat.entries()) {
+      const out: Map<string, SourceRef[]> = new Map();
+      for (const [cat, srcMap] of catMap.entries()) {
+        const srcs = Array.from(srcMap.values()).sort((a, b) => a.label.localeCompare(b.label));
+        out.set(cat, srcs);
+      }
+      this.launchSourcesByWorkspaceCategory.set(wk, out);
     }
 
     // Tasks: workspace -> category -> source -> items
@@ -245,13 +328,47 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         return item;
       }
 
+      case "launchCategory": {
+        const item = new vscode.TreeItem(element.category, vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "betterRun.launchCategory";
+        item.iconPath = new vscode.ThemeIcon("folder");
+        item.tooltip = undefined;
+        return item;
+      }
+
+      case "launchSource": {
+        const item = new vscode.TreeItem(element.sourceLabel, vscode.TreeItemCollapsibleState.Collapsed);
+        item.contextValue = "betterRun.launchSource";
+        item.iconPath = new vscode.ThemeIcon("file");
+        item.tooltip = undefined;
+        return item;
+      }
+
+      case "launchTop": {
+        const item = new vscode.TreeItem(element.item.name, vscode.TreeItemCollapsibleState.None);
+        item.contextValue = "betterRun.launch";
+        const isRunning = this.runningLaunches.has(element.item.id);
+        item.iconPath = isRunning 
+          ? new vscode.ThemeIcon("loading~spin")
+          : new vscode.ThemeIcon("debug-start");
+        // Don't set command - clicking should not trigger, only the buttons should
+        item.tooltip = isRunning 
+          ? `Debugging: ${element.item.name}` 
+          : `${element.item.name}\nRight-click for Debug/Run options`;
+        return item;
+      }
+
       case "launch": {
         const item = new vscode.TreeItem(element.item.name, vscode.TreeItemCollapsibleState.None);
         item.contextValue = "betterRun.launch";
-        item.iconPath = new vscode.ThemeIcon("debug-start");
-        // Left click defaults to Debug
-        item.command = { command: "betterRun.debugLaunch", title: "Debug", arguments: [element.item] };
-        item.tooltip = undefined;
+        const isRunning = this.runningLaunches.has(element.item.id);
+        item.iconPath = isRunning 
+          ? new vscode.ThemeIcon("loading~spin")
+          : new vscode.ThemeIcon("debug-start");
+        // Don't set command - clicking should not trigger, only the buttons should
+        item.tooltip = isRunning 
+          ? `Debugging: ${element.item.name}` 
+          : `${element.item.name}\nRight-click for Debug/Run options`;
         return item;
       }
 
@@ -266,18 +383,30 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
       case "taskTop": {
         const item = new vscode.TreeItem(element.item.label, vscode.TreeItemCollapsibleState.None);
         item.contextValue = "betterRun.task";
-        item.iconPath = new vscode.ThemeIcon("play");
+        const isRunning = this.runningTasks.has(element.item.id);
+        item.iconPath = isRunning 
+          ? new vscode.ThemeIcon("loading~spin")
+          : new vscode.ThemeIcon("play");
+        // Allow clicking on the play icon to run the task
         item.command = { command: "betterRun.runTask", title: "Run Task", arguments: [element.item] };
-        item.tooltip = undefined;
+        item.tooltip = isRunning 
+          ? `Running: ${element.item.label}` 
+          : `Click to run "${element.item.label}"`;
         return item;
       }
 
       case "task": {
         const item = new vscode.TreeItem(element.item.label, vscode.TreeItemCollapsibleState.None);
         item.contextValue = "betterRun.task";
-        item.iconPath = new vscode.ThemeIcon("play");
+        const isRunning = this.runningTasks.has(element.item.id);
+        item.iconPath = isRunning 
+          ? new vscode.ThemeIcon("loading~spin")
+          : new vscode.ThemeIcon("play");
+        // Allow clicking on the play icon to run the task
         item.command = { command: "betterRun.runTask", title: "Run Task", arguments: [element.item] };
-        item.tooltip = undefined;
+        item.tooltip = isRunning 
+          ? `Running: ${element.item.label}` 
+          : `Click to run "${element.item.label}"`;
         return item;
       }
     }
@@ -320,12 +449,50 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
 
     // ---------- Launches ----------
     if (element.kind === "section" && element.section === "Launches") {
-      const bySource: Map<string, LaunchItem[]> =
-        this.launchesByWorkspaceAndSource.get(element.workspaceKey) ?? new Map<string, LaunchItem[]>();
+      const catLaunches: Map<string, Map<string, LaunchItem[]>> =
+        this.launchesByWorkspaceCategorySource.get(element.workspaceKey) ??
+        new Map<string, Map<string, LaunchItem[]>>();
     
-      // flatten all launches in this workspace
+      // Collect top-level launches (category undefined)
+      const top = this.topLevelLaunchesByWorkspace.get(element.workspaceKey) ?? [];
+    
+      let topItems = top;
+      if (filter) topItems = topItems.filter((i: LaunchItem) => i.name.toLowerCase().includes(filter));
+      topItems.sort((a, b) => a.name.localeCompare(b.name));
+    
+      const cats: string[] = this.launchCategoriesByWorkspace.get(element.workspaceKey) ?? [];
+    
+      // Filter categories to only those with matches
+      let catNodes: Node[] = cats.map((c: string) => ({ kind: "launchCategory", workspaceKey: element.workspaceKey, category: c }));
+      if (filter) {
+        catNodes = cats
+          .filter((c) => {
+            const srcMap = catLaunches.get(c) ?? new Map<string, LaunchItem[]>();
+            return Array.from(srcMap.values()).some((arr: LaunchItem[]) =>
+              arr.some((i: LaunchItem) => i.name.toLowerCase().includes(filter))
+            );
+          })
+          .map((c) => ({ kind: "launchCategory", workspaceKey: element.workspaceKey, category: c }));
+      }
+    
+      const topNodes: Node[] = topItems.map((i: LaunchItem) => ({ kind: "launchTop", item: i }));
+    
+      return [...topNodes, ...catNodes];
+    }
+
+    if (element.kind === "launchCategory") {
+      const catLaunches: Map<string, Map<string, LaunchItem[]>> =
+        this.launchesByWorkspaceCategorySource.get(element.workspaceKey) ??
+        new Map<string, Map<string, LaunchItem[]>>();
+    
+      const srcMap: Map<string, LaunchItem[]> =
+        catLaunches.get(element.category) ?? new Map<string, LaunchItem[]>();
+    
+      // Flatten all launches across all sources for this category
       let all: LaunchItem[] = [];
-      for (const arr of bySource.values()) all = all.concat(arr);
+      for (const arr of srcMap.values()) {
+        all = all.concat(arr);
+      }
     
       if (filter) {
         all = all.filter((i: LaunchItem) => i.name.toLowerCase().includes(filter));
