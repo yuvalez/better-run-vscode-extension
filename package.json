@@ -34,6 +34,21 @@
         "command": "betterRun.collapseAll",
         "key": "cmd+shift+\\",
         "when": "view == betterRun.runs"
+      },
+      {
+        "command": "betterRun.rerunLastTask",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r"
+      },
+      {
+        "command": "betterRun.rerunLastLaunch",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l"
+      },
+      {
+        "command": "betterRun.redebugLastLaunch",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d"
       }
     ],
     "viewsContainers": {
@@ -99,6 +114,24 @@
         "command": "betterRun.collapseAll",
         "title": "Collapse All",
         "icon": "$(collapse-all)",
+        "category": "Better Run"
+      },
+      {
+        "command": "betterRun.rerunLastTask",
+        "title": "Rerun Last Task",
+        "icon": "$(sync)",
+        "category": "Better Run"
+      },
+      {
+        "command": "betterRun.rerunLastLaunch",
+        "title": "Rerun Last Launch",
+        "icon": "$(sync)",
+        "category": "Better Run"
+      },
+      {
+        "command": "betterRun.redebugLastLaunch",
+        "title": "Re-debug Last Launch",
+        "icon": "$(sync)",
         "category": "Better Run"
       }
     ],

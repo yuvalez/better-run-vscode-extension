@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as path from "path";
 import { loadLaunchesAndTasks, LaunchItem, TaskItem, NotebookItem, SourceRef } from "./sources";
 import { Storage } from "./storage";
 
@@ -35,6 +36,9 @@ function workspaceKeyFromFolder(wf?: vscode.WorkspaceFolder): string {
 export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<Node | undefined | null>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+  // Map to track TreeItems to their underlying Node data for double-click detection
+  private treeItemToNode = new WeakMap<vscode.TreeItem, Node>();
 
   private workspaces: WorkspaceNode[] = [];
 
@@ -75,7 +79,11 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
   private runningLaunches: Set<string> = new Set(); // launch id
   private runningTasks: Set<string> = new Set(); // task id
 
-  constructor(private readonly storage: Storage) {}
+  private readonly extensionPath: string;
+
+  constructor(private readonly storage: Storage, extensionContext: vscode.ExtensionContext) {
+    this.extensionPath = extensionContext.extensionPath;
+  }
 
   setLaunchRunning(launchId: string, running: boolean): void {
     if (running) {
@@ -346,6 +354,7 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         item.contextValue = "betterRun.workspace";
         item.iconPath = new vscode.ThemeIcon("root-folder");
         item.tooltip = undefined;
+        this.treeItemToNode.set(item, element);
         return item;
       }
 
@@ -357,6 +366,7 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const raw = this.storage.getNameFilter().trim();
         item.description = raw ? `filter: ${raw}` : undefined;
         item.tooltip = undefined;
+        this.treeItemToNode.set(item, element);
         return item;
       }
 
@@ -365,6 +375,7 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         item.contextValue = "betterRun.launchCategory";
         item.iconPath = new vscode.ThemeIcon("folder");
         item.tooltip = undefined;
+        this.treeItemToNode.set(item, element);
         return item;
       }
 
@@ -373,6 +384,7 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         item.contextValue = "betterRun.launchSource";
         item.iconPath = new vscode.ThemeIcon("file");
         item.tooltip = undefined;
+        this.treeItemToNode.set(item, element);
         return item;
       }
 
@@ -382,11 +394,13 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const isRunning = this.runningLaunches.has(element.item.id);
         item.iconPath = isRunning 
           ? new vscode.ThemeIcon("loading~spin")
-          : new vscode.ThemeIcon("debug-start");
-        // Don't set command - clicking should not trigger, only the buttons should
+          : new vscode.ThemeIcon("zap", new vscode.ThemeColor("charts.yellow"));
+        // Set no-op command to prevent default click behavior, double-click will trigger execution
+        item.command = { command: "betterRun.noop", title: "", arguments: [] };
         item.tooltip = isRunning 
           ? `Debugging: ${element.item.name}` 
-          : `${element.item.name}\nRight-click for Debug/Run options`;
+          : `${element.item.name}\nDouble-click to run, right-click for Debug/Run options`;
+        this.treeItemToNode.set(item, element);
         return item;
       }
 
@@ -396,11 +410,13 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const isRunning = this.runningLaunches.has(element.item.id);
         item.iconPath = isRunning 
           ? new vscode.ThemeIcon("loading~spin")
-          : new vscode.ThemeIcon("debug-start");
-        // Don't set command - clicking should not trigger, only the buttons should
+          : new vscode.ThemeIcon("zap", new vscode.ThemeColor("charts.yellow"));
+        // Set no-op command to prevent default click behavior, double-click will trigger execution
+        item.command = { command: "betterRun.noop", title: "", arguments: [] };
         item.tooltip = isRunning 
           ? `Debugging: ${element.item.name}` 
-          : `${element.item.name}\nRight-click for Debug/Run options`;
+          : `${element.item.name}\nDouble-click to run, right-click for Debug/Run options`;
+        this.treeItemToNode.set(item, element);
         return item;
       }
 
@@ -409,6 +425,7 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         item.contextValue = "betterRun.taskCategory";
         item.iconPath = new vscode.ThemeIcon("folder");
         item.tooltip = undefined;
+        this.treeItemToNode.set(item, element);
         return item;
       }
 
@@ -418,12 +435,13 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const isRunning = this.runningTasks.has(element.item.id);
         item.iconPath = isRunning 
           ? new vscode.ThemeIcon("loading~spin")
-          : new vscode.ThemeIcon("play");
-        // Allow clicking on the play icon to run the task
-        item.command = { command: "betterRun.runTask", title: "Run Task", arguments: [element.item] };
+          : new vscode.ThemeIcon("symbol-method");
+        // Set no-op command to prevent default click behavior, double-click will trigger execution
+        item.command = { command: "betterRun.noop", title: "", arguments: [] };
         item.tooltip = isRunning 
           ? `Running: ${element.item.label}` 
-          : `Click to run "${element.item.label}"`;
+          : `Double-click to run "${element.item.label}"`;
+        this.treeItemToNode.set(item, element);
         return item;
       }
 
@@ -433,26 +451,36 @@ export class BetterRunTreeProvider implements vscode.TreeDataProvider<Node> {
         const isRunning = this.runningTasks.has(element.item.id);
         item.iconPath = isRunning 
           ? new vscode.ThemeIcon("loading~spin")
-          : new vscode.ThemeIcon("play");
-        // Allow clicking on the play icon to run the task
-        item.command = { command: "betterRun.runTask", title: "Run Task", arguments: [element.item] };
+          : new vscode.ThemeIcon("symbol-method");
+        // Set no-op command to prevent default click behavior, double-click will trigger execution
+        item.command = { command: "betterRun.noop", title: "", arguments: [] };
         item.tooltip = isRunning 
           ? `Running: ${element.item.label}` 
-          : `Click to run "${element.item.label}"`;
+          : `Double-click to run "${element.item.label}"`;
+        this.treeItemToNode.set(item, element);
         return item;
       }
 
       case "notebook": {
         const item = new vscode.TreeItem(element.item.name, vscode.TreeItemCollapsibleState.None);
         item.contextValue = "betterRun.notebook";
-        item.iconPath = new vscode.ThemeIcon("notebook");
+        const jupyterIconPath = path.join(this.extensionPath, "media", "jupyter.svg");
+        item.iconPath = {
+          light: vscode.Uri.file(jupyterIconPath),
+          dark: vscode.Uri.file(jupyterIconPath)
+        };
         item.command = { command: "betterRun.openNotebook", title: "Open Notebook", arguments: [element.item] };
         const location = element.item.isLocal ? "Local" : element.item.workspaceFolder?.name;
         item.tooltip = `${element.item.name}\n${location ? `Location: ${location}` : ''}\nClick to open`;
         item.resourceUri = element.item.uri;
+        this.treeItemToNode.set(item, element);
         return item;
       }
     }
+  }
+
+  getNodeFromTreeItem(treeItem: vscode.TreeItem): Node | undefined {
+    return this.treeItemToNode.get(treeItem);
   }
 
   async getChildren(element?: Node): Promise<Node[]> {
