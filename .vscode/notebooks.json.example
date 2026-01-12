@@ -1,0 +1,8 @@
+{
+  "paths": [
+    "/absolute/path/to/notebook.ipynb",
+    "relative/path/to/notebook.ipynb",
+    "/absolute/path/to/notebooks/directory",
+    "relative/path/to/notebooks/directory"
+  ]
+}
