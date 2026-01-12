@@ -2,7 +2,7 @@
   "name": "better-run",
   "displayName": "Better Run",
   "description": "Organize and run debug launches and tasks from multiple sources.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "yuvalezuz",
   "icon": "media/icon.png",
   "repository": {
