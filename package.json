@@ -133,6 +133,12 @@
         "title": "Re-debug Last Launch",
         "icon": "$(sync)",
         "category": "Better Run"
+      },
+      {
+        "command": "betterRun.addFileAsLaunch",
+        "title": "Add as Local Launch",
+        "icon": "$(add)",
+        "category": "Better Run"
       }
     ],
     "configuration": {
@@ -252,6 +258,13 @@
         {
           "command": "betterRun.clearSearch",
           "when": "view == betterRun.runs",
+          "group": "navigation"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "betterRun.addFileAsLaunch",
+          "when": "editorLangId != markdown && editorLangId != plaintext",
           "group": "navigation"
         }
       ]

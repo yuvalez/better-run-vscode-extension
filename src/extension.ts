@@ -535,6 +535,143 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("betterRun.addFileAsLaunch", async (uri?: vscode.Uri) => {
+      // Get the file URI - either from the command argument or the active editor
+      let fileUri: vscode.Uri | undefined;
+      if (uri) {
+        fileUri = uri;
+      } else {
+        const activeEditor = vscode.window.activeTextEditor;
+        if (activeEditor) {
+          fileUri = activeEditor.document.uri;
+        }
+      }
+
+      if (!fileUri) {
+        vscode.window.showErrorMessage("No file is open or selected.");
+        return;
+      }
+
+      // Only work with file:// URIs
+      if (fileUri.scheme !== "file") {
+        vscode.window.showErrorMessage("Only local files can be added as launches.");
+        return;
+      }
+
+      const fileName = fileUri.fsPath.split(/[/\\]/).pop() || "file";
+      const fileExtension = fileName.split('.').pop()?.toLowerCase() || "";
+      const languageId = vscode.window.activeTextEditor?.document.languageId;
+
+      // Get current user launches
+      const config = vscode.workspace.getConfiguration("betterRun");
+      const currentLaunches = config.get<any[]>("userLaunches") || [];
+
+      // Check if a launch for this file already exists
+      const existingLaunch = currentLaunches.find((l: any) => 
+        l.program === fileUri?.fsPath || 
+        (l.program === "${file}" && l.name?.includes(fileName))
+      );
+
+      if (existingLaunch) {
+        const action = await vscode.window.showInformationMessage(
+          `A launch configuration for "${fileName}" already exists.`,
+          "Edit",
+          "Add Anyway",
+          "Cancel"
+        );
+        if (action === "Cancel" || !action) return;
+        if (action === "Edit") {
+          // Open settings.json for editing
+          await vscode.commands.executeCommand("workbench.action.openSettingsJson");
+          return;
+        }
+      }
+
+      // Create a launch configuration based on file type
+      let launchConfig: any = {
+        name: `${fileName}`,
+        type: "node", // default
+        request: "launch",
+        program: fileUri.fsPath,
+        console: "integratedTerminal"
+      };
+
+      // Detect appropriate launch type based on language or extension
+      if (languageId === "python" || fileExtension === "py") {
+        launchConfig = {
+          name: `Python: ${fileName}`,
+          type: "python",
+          request: "launch",
+          program: fileUri.fsPath,
+          console: "integratedTerminal",
+          justMyCode: true
+        };
+      } else if (languageId === "javascript" || languageId === "typescript" || 
+                 fileExtension === "js" || fileExtension === "ts" || fileExtension === "mjs" || fileExtension === "cjs") {
+        launchConfig = {
+          name: `Node: ${fileName}`,
+          type: "node",
+          request: "launch",
+          program: fileUri.fsPath,
+          console: "integratedTerminal"
+        };
+      } else if (languageId === "go" || fileExtension === "go") {
+        launchConfig = {
+          name: `Go: ${fileName}`,
+          type: "go",
+          request: "launch",
+          mode: "debug",
+          program: fileUri.fsPath
+        };
+      } else if (languageId === "rust" || fileExtension === "rs") {
+        launchConfig = {
+          name: `Rust: ${fileName}`,
+          type: "lldb",
+          request: "launch",
+          program: "${workspaceFolder}/target/debug/${fileBasenameNoExtension}",
+          args: [],
+          cwd: "${workspaceFolder}"
+        };
+      } else if (languageId === "java" || fileExtension === "java") {
+        launchConfig = {
+          name: `Java: ${fileName}`,
+          type: "java",
+          request: "launch",
+          mainClass: "${file}",
+          projectName: "${workspaceFolder}"
+        };
+      } else {
+        // Generic fallback - ask user for type
+        const launchType = await vscode.window.showInputBox({
+          prompt: "Enter launch type (e.g., 'python', 'node', 'go')",
+          placeHolder: "node",
+          value: "node"
+        });
+        if (!launchType) return;
+
+        launchConfig = {
+          name: `${launchType}: ${fileName}`,
+          type: launchType,
+          request: "launch",
+          program: fileUri.fsPath,
+          console: "integratedTerminal"
+        };
+      }
+
+      // Add the new launch to the array
+      const updatedLaunches = [...currentLaunches, launchConfig];
+
+      // Update the configuration
+      await config.update("userLaunches", updatedLaunches, vscode.ConfigurationTarget.Global);
+
+      // Refresh the tree view
+      await provider.refresh();
+
+      vscode.window.showInformationMessage(`Added "${launchConfig.name}" as a local launch configuration.`);
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand("betterRun.openNotebook", async (arg: NotebookItem | { item: NotebookItem }) => {
       const item = (arg && typeof arg === 'object' && 'uri' in arg) ? arg as NotebookItem : (arg as any)?.item;
       if (!item?.uri) return;
