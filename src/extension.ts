@@ -44,8 +44,7 @@ const VIEW_ID = "betterRun.runs";
 let outputChannel: vscode.OutputChannel | undefined;
 
 // Track last executed items for rerun commands
-let lastDebugLaunch: LaunchItem | undefined;
-let lastRunLaunch: LaunchItem | undefined;
+let lastLaunch: LaunchItem | undefined; // Shared pool for both run and debug
 let lastTask: TaskItem | undefined;
 
 async function executeDebugLaunch(
@@ -55,8 +54,8 @@ async function executeDebugLaunch(
 ): Promise<void> {
   if (!item?.config) return;
 
-  // Track as last debug launch
-  lastDebugLaunch = item;
+  // Track as last launch (shared pool for both run and debug)
+  lastLaunch = item;
 
   // Set loading state
   provider.setLaunchRunning(item.id, true);
@@ -117,8 +116,8 @@ async function executeRunLaunch(
 ): Promise<void> {
   if (!item?.config) return;
 
-  // Track as last run launch
-  lastRunLaunch = item;
+  // Track as last launch (shared pool for both run and debug)
+  lastLaunch = item;
 
   // Set loading state
   provider.setLaunchRunning(item.id, true);
@@ -517,21 +516,21 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("betterRun.rerunLastLaunch", async () => {
-      if (!lastRunLaunch) {
-        vscode.window.showInformationMessage("No launch has been run yet.");
+      if (!lastLaunch) {
+        vscode.window.showInformationMessage("No launch has been run or debugged yet.");
         return;
       }
-      await executeRunLaunch(lastRunLaunch, provider, context);
+      await executeRunLaunch(lastLaunch, provider, context);
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("betterRun.redebugLastLaunch", async () => {
-      if (!lastDebugLaunch) {
-        vscode.window.showInformationMessage("No launch has been debugged yet.");
+      if (!lastLaunch) {
+        vscode.window.showInformationMessage("No launch has been run or debugged yet.");
         return;
       }
-      await executeDebugLaunch(lastDebugLaunch, provider, context);
+      await executeDebugLaunch(lastLaunch, provider, context);
     })
   );
 
