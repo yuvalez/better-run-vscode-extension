@@ -10,14 +10,19 @@
 
 ## Features
 
-- 🌳 **Unified Tree View**: Browse all your launches and tasks in one organized view
+- 🌳 **Unified Tree View**: Browse all your launches, tasks, and notebooks in one organized view
 - 📁 **Multi-Source Support**: Automatically discovers launches and tasks from:
   - Workspace `.vscode/launch.json` files
   - Workspace `.vscode/tasks.json` files
   - User settings (global launches and tasks)
+- 📓 **Notebook Support**: Discover and open Jupyter notebooks from workspace and user settings
 - 🏷️ **Smart Task Categorization**: Automatically categorizes tasks using pattern matching rules
-- 🔍 **Search & Filter**: Quickly find launches and tasks by name
-- ⚡ **Quick Actions**: Run, debug, or execute tasks directly from the tree view
+- 🔍 **Search & Filter**: Quickly find launches, tasks, and notebooks by name
+- ⚡ **Quick Actions**: Run, debug, or execute tasks directly from the tree view with inline buttons
+- 🖱️ **Double-Click to Run**: Double-click any launch or task to execute it
+- ⌨️ **Keyboard Shortcuts**: Quick rerun/redebug of last executed items
+- 🐍 **Python venv Support**: Attach virtual environments to Python launches and tasks
+- 📝 **Editor Integration**: Right-click editor tabs to quickly create and run launches
 - 🔄 **Auto-Refresh**: Automatically updates when configurations change
 
 ## Installation
@@ -50,28 +55,47 @@ Workspace Name
 │   │   └── Launch Configuration 2
 │   └── User settings
 │       └── User Launch 1
-└── Tasks
-    ├── Task without category (top-level)
-    ├── Category Name
-    │   ├── tasks.json
-    │   │   ├── Task 1
-    │   │   └── Task 2
-    │   └── User settings
-    │       └── User Task 1
-    └── Another Category
-        └── ...
+├── Tasks
+│   ├── Task without category (top-level)
+│   ├── Category Name
+│   │   ├── tasks.json
+│   │   │   ├── Task 1
+│   │   │   └── Task 2
+│   │   └── User settings
+│   │       └── User Task 1
+│   └── Another Category
+│       └── ...
+└── Notebooks
+    ├── notebook1.ipynb
+    ├── notebook2.ipynb
+    └── ...
 ```
 
 ### Running Launches
 
-- **Debug**: Click on a launch configuration, or use the "Debug" button in the context menu
-- **Run (without debugging)**: Right-click a launch and select "Run", or use the "Run" button in the context menu
+- **Double-click**: Double-click a launch to run it (without debugging)
+- **Inline Buttons**: Use the Run (▶️) and Debug (🐛) buttons next to each launch
+- **Context Menu**: Right-click a launch for options:
+  - **Run**: Run the launch without debugging
+  - **Debug**: Debug the launch
+  - **Attach venv**: Attach a Python virtual environment (Python launches only)
+  - **Go to Settings Definition**: Open the file where the launch is defined
 
 ### Running Tasks
 
-- Click on a task to execute it
+- **Double-click**: Double-click a task to execute it
+- **Inline Button**: Use the Run (▶️) button next to each task
+- **Context Menu**: Right-click a task for options:
+  - **Run**: Execute the task
+  - **Attach venv**: Attach a Python virtual environment (Python tasks only)
+  - **Go to Settings Definition**: Open the file where the task is defined
 - Tasks from `tasks.json` are executed via VS Code's task system
 - Tasks from user settings are executed in a terminal
+
+### Opening Notebooks
+
+- **Click**: Click a notebook to open it in the default notebook editor
+- Notebooks are displayed with a Jupyter icon (🟠)
 
 ### Search & Filter
 
@@ -83,10 +107,24 @@ Workspace Name
 ### Keyboard Shortcuts
 
 - `Cmd+Shift+\` (macOS) or `Ctrl+Shift+\` (Windows/Linux): Collapse all items in the view
+- `Ctrl+Shift+R` (Mac: `Cmd+Shift+R`): Rerun last task
+- `Ctrl+Shift+L` (Mac: `Cmd+Shift+L`): Rerun last launch
+- `Ctrl+Shift+D` (Mac: `Cmd+Shift+D`): Re-debug last launch
+
+**Note**: The rerun and redebug commands share the same pool - they both use the most recently run or debugged launch.
+
+### Editor Tab Integration
+
+Right-click on any editor tab (except markdown/plaintext files) to access:
+
+- **Run File as Launch**: Creates a launch configuration for the current file (if it doesn't exist) and runs it
+- **Debug File as Launch**: Creates a launch configuration for the current file (if it doesn't exist) and debugs it
+
+The extension automatically detects the file type (Python, Node.js, Go, Rust, Java, etc.) and creates an appropriate launch configuration.
 
 ### Refresh
 
-Click the **Refresh** icon (🔄) in the view title bar to manually reload all launches and tasks.
+Click the **Refresh** icon (🔄) in the view title bar to manually reload all launches, tasks, and notebooks.
 
 ## Configuration
 
@@ -233,6 +271,28 @@ Map specific task labels to categories. This takes precedence over `taskCategory
 }
 ```
 
+### `betterRun.userNotebookPaths`
+
+Define paths to Jupyter notebooks that will be available globally across all workspaces.
+
+**Type**: `array`  
+**Default**: `[]`
+
+Paths can be absolute or relative to the workspace. They can point to individual `.ipynb` files or directories containing notebooks.
+
+**Example**:
+```jsonc
+{
+  "betterRun.userNotebookPaths": [
+    "/absolute/path/to/notebook.ipynb",
+    "~/notebooks",
+    "relative/path/to/notebooks"
+  ]
+}
+```
+
+**Note**: For workspace-specific notebooks, use `.vscode/notebooks.json` instead.
+
 ## Complete Configuration Example
 
 Here's a comprehensive example combining all configuration options:
@@ -261,6 +321,10 @@ Here's a comprehensive example combining all configuration options:
       "type": "shell",
       "command": "ruff format . && ruff check --fix ."
     }
+  ],
+  "betterRun.userNotebookPaths": [
+    "~/notebooks",
+    "/absolute/path/to/notebook.ipynb"
   ],
   "betterRun.taskCategoryRules": [
     {
@@ -324,6 +388,8 @@ Better Run discovers Jupyter notebooks from:
      ```
 2. **User Settings**: Notebook paths defined in `betterRun.userNotebookPaths` (array of strings)
 
+Notebooks are displayed with a Jupyter icon and open in the default notebook editor when clicked.
+
 ### Task Categorization
 
 Tasks are categorized using the following priority:
@@ -332,6 +398,13 @@ Tasks are categorized using the following priority:
 2. **Pattern matching** (`taskCategoryRules`) - evaluated in order, first match wins
 3. **Label prefix** - If label matches `^Category: ...`, uses "Category" as the category
 4. **No category** - Tasks without a category appear at the top level under "Tasks"
+
+### Visual Indicators
+
+- **Launches**: Displayed with a yellow lightning bolt icon (⚡)
+- **Tasks**: Displayed with a method icon (🔧)
+- **Notebooks**: Displayed with a Jupyter icon (🟠)
+- **Running items**: Show a spinning loading icon while executing
 
 ## Development
 
