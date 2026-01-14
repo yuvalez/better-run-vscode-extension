@@ -4,6 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import { BetterRunTreeProvider } from "./tree";
 import type { LaunchItem, TaskItem, NotebookItem } from "./sources";
+import { loadLaunchesAndTasks } from "./sources";
 import { Storage } from "./storage";
 
 
@@ -534,8 +535,136 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Helper function to create a launch configuration for a file
+  async function createLaunchConfigForFile(fileUri: vscode.Uri, languageId?: string): Promise<any> {
+    const fileName = fileUri.fsPath.split(/[/\\]/).pop() || "file";
+    const fileExtension = fileName.split('.').pop()?.toLowerCase() || "";
+
+    // Create a launch configuration based on file type
+    let launchConfig: any = {
+      name: `${fileName}`,
+      type: "node", // default
+      request: "launch",
+      program: fileUri.fsPath,
+      console: "integratedTerminal"
+    };
+
+    // Detect appropriate launch type based on language or extension
+    if (languageId === "python" || fileExtension === "py") {
+      launchConfig = {
+        name: `Python: ${fileName}`,
+        type: "python",
+        request: "launch",
+        program: fileUri.fsPath,
+        console: "integratedTerminal",
+        justMyCode: true
+      };
+    } else if (languageId === "javascript" || languageId === "typescript" || 
+               fileExtension === "js" || fileExtension === "ts" || fileExtension === "mjs" || fileExtension === "cjs") {
+      launchConfig = {
+        name: `Node: ${fileName}`,
+        type: "node",
+        request: "launch",
+        program: fileUri.fsPath,
+        console: "integratedTerminal"
+      };
+    } else if (languageId === "go" || fileExtension === "go") {
+      launchConfig = {
+        name: `Go: ${fileName}`,
+        type: "go",
+        request: "launch",
+        mode: "debug",
+        program: fileUri.fsPath
+      };
+    } else if (languageId === "rust" || fileExtension === "rs") {
+      launchConfig = {
+        name: `Rust: ${fileName}`,
+        type: "lldb",
+        request: "launch",
+        program: "${workspaceFolder}/target/debug/${fileBasenameNoExtension}",
+        args: [],
+        cwd: "${workspaceFolder}"
+      };
+    } else if (languageId === "java" || fileExtension === "java") {
+      launchConfig = {
+        name: `Java: ${fileName}`,
+        type: "java",
+        request: "launch",
+        mainClass: "${file}",
+        projectName: "${workspaceFolder}"
+      };
+    } else {
+      // Generic fallback - ask user for type
+      const launchType = await vscode.window.showInputBox({
+        prompt: "Enter launch type (e.g., 'python', 'node', 'go')",
+        placeHolder: "node",
+        value: "node"
+      });
+      if (!launchType) return undefined;
+
+      launchConfig = {
+        name: `${launchType}: ${fileName}`,
+        type: launchType,
+        request: "launch",
+        program: fileUri.fsPath,
+        console: "integratedTerminal"
+      };
+    }
+
+    return launchConfig;
+  }
+
+  // Helper function to find or create a launch for a file
+  async function findOrCreateLaunchForFile(fileUri: vscode.Uri): Promise<LaunchItem | undefined> {
+    const fileName = fileUri.fsPath.split(/[/\\]/).pop() || "file";
+    const languageId = vscode.window.activeTextEditor?.document.languageId;
+
+    // First, check if a launch already exists by loading all launches
+    const { launches } = await loadLaunchesAndTasks();
+    const existingLaunchItem = launches.find((l: LaunchItem) => {
+      // Check if the launch config program matches the file path
+      const configProgram = l.config?.program;
+      if (configProgram === fileUri.fsPath) {
+        return true;
+      }
+      // Also check if name matches the file (for cases where program might be different)
+      if (l.name && (l.name.includes(fileName) || l.name === fileName)) {
+        return true;
+      }
+      return false;
+    });
+
+    if (existingLaunchItem) {
+      return existingLaunchItem;
+    }
+
+    // Create a new launch configuration
+    const launchConfig = await createLaunchConfigForFile(fileUri, languageId);
+    if (!launchConfig) return undefined;
+
+    // Get current user launches and add the new one
+    const config = vscode.workspace.getConfiguration("betterRun");
+    const currentLaunches = config.get<any[]>("userLaunches") || [];
+    const updatedLaunches = [...currentLaunches, launchConfig];
+
+    // Update the configuration
+    await config.update("userLaunches", updatedLaunches, vscode.ConfigurationTarget.Global);
+
+    // Refresh the tree view
+    await provider.refresh();
+
+    // Wait a bit for the refresh to complete, then find the new launch
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const { launches: refreshedLaunches } = await loadLaunchesAndTasks();
+    const newLaunchItem = refreshedLaunches.find((l: LaunchItem) => 
+      l.config?.program === launchConfig.program && l.name === launchConfig.name
+    );
+
+    return newLaunchItem;
+  }
+
   context.subscriptions.push(
-    vscode.commands.registerCommand("betterRun.addFileAsLaunch", async (uri?: vscode.Uri) => {
+    vscode.commands.registerCommand("betterRun.runFileAsLaunch", async (uri?: vscode.Uri) => {
       // Get the file URI - either from the command argument or the active editor
       let fileUri: vscode.Uri | undefined;
       if (uri) {
@@ -554,120 +683,51 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Only work with file:// URIs
       if (fileUri.scheme !== "file") {
-        vscode.window.showErrorMessage("Only local files can be added as launches.");
+        vscode.window.showErrorMessage("Only local files can be run as launches.");
         return;
       }
 
-      const fileName = fileUri.fsPath.split(/[/\\]/).pop() || "file";
-      const fileExtension = fileName.split('.').pop()?.toLowerCase() || "";
-      const languageId = vscode.window.activeTextEditor?.document.languageId;
+      const launchItem = await findOrCreateLaunchForFile(fileUri);
+      if (!launchItem) {
+        vscode.window.showErrorMessage("Failed to create or find launch configuration.");
+        return;
+      }
 
-      // Get current user launches
-      const config = vscode.workspace.getConfiguration("betterRun");
-      const currentLaunches = config.get<any[]>("userLaunches") || [];
+      await executeRunLaunch(launchItem, provider, context);
+    })
+  );
 
-      // Check if a launch for this file already exists
-      const existingLaunch = currentLaunches.find((l: any) => 
-        l.program === fileUri?.fsPath || 
-        (l.program === "${file}" && l.name?.includes(fileName))
-      );
-
-      if (existingLaunch) {
-        const action = await vscode.window.showInformationMessage(
-          `A launch configuration for "${fileName}" already exists.`,
-          "Edit",
-          "Add Anyway",
-          "Cancel"
-        );
-        if (action === "Cancel" || !action) return;
-        if (action === "Edit") {
-          // Open settings.json for editing
-          await vscode.commands.executeCommand("workbench.action.openSettingsJson");
-          return;
+  context.subscriptions.push(
+    vscode.commands.registerCommand("betterRun.debugFileAsLaunch", async (uri?: vscode.Uri) => {
+      // Get the file URI - either from the command argument or the active editor
+      let fileUri: vscode.Uri | undefined;
+      if (uri) {
+        fileUri = uri;
+      } else {
+        const activeEditor = vscode.window.activeTextEditor;
+        if (activeEditor) {
+          fileUri = activeEditor.document.uri;
         }
       }
 
-      // Create a launch configuration based on file type
-      let launchConfig: any = {
-        name: `${fileName}`,
-        type: "node", // default
-        request: "launch",
-        program: fileUri.fsPath,
-        console: "integratedTerminal"
-      };
-
-      // Detect appropriate launch type based on language or extension
-      if (languageId === "python" || fileExtension === "py") {
-        launchConfig = {
-          name: `Python: ${fileName}`,
-          type: "python",
-          request: "launch",
-          program: fileUri.fsPath,
-          console: "integratedTerminal",
-          justMyCode: true
-        };
-      } else if (languageId === "javascript" || languageId === "typescript" || 
-                 fileExtension === "js" || fileExtension === "ts" || fileExtension === "mjs" || fileExtension === "cjs") {
-        launchConfig = {
-          name: `Node: ${fileName}`,
-          type: "node",
-          request: "launch",
-          program: fileUri.fsPath,
-          console: "integratedTerminal"
-        };
-      } else if (languageId === "go" || fileExtension === "go") {
-        launchConfig = {
-          name: `Go: ${fileName}`,
-          type: "go",
-          request: "launch",
-          mode: "debug",
-          program: fileUri.fsPath
-        };
-      } else if (languageId === "rust" || fileExtension === "rs") {
-        launchConfig = {
-          name: `Rust: ${fileName}`,
-          type: "lldb",
-          request: "launch",
-          program: "${workspaceFolder}/target/debug/${fileBasenameNoExtension}",
-          args: [],
-          cwd: "${workspaceFolder}"
-        };
-      } else if (languageId === "java" || fileExtension === "java") {
-        launchConfig = {
-          name: `Java: ${fileName}`,
-          type: "java",
-          request: "launch",
-          mainClass: "${file}",
-          projectName: "${workspaceFolder}"
-        };
-      } else {
-        // Generic fallback - ask user for type
-        const launchType = await vscode.window.showInputBox({
-          prompt: "Enter launch type (e.g., 'python', 'node', 'go')",
-          placeHolder: "node",
-          value: "node"
-        });
-        if (!launchType) return;
-
-        launchConfig = {
-          name: `${launchType}: ${fileName}`,
-          type: launchType,
-          request: "launch",
-          program: fileUri.fsPath,
-          console: "integratedTerminal"
-        };
+      if (!fileUri) {
+        vscode.window.showErrorMessage("No file is open or selected.");
+        return;
       }
 
-      // Add the new launch to the array
-      const updatedLaunches = [...currentLaunches, launchConfig];
+      // Only work with file:// URIs
+      if (fileUri.scheme !== "file") {
+        vscode.window.showErrorMessage("Only local files can be debugged as launches.");
+        return;
+      }
 
-      // Update the configuration
-      await config.update("userLaunches", updatedLaunches, vscode.ConfigurationTarget.Global);
+      const launchItem = await findOrCreateLaunchForFile(fileUri);
+      if (!launchItem) {
+        vscode.window.showErrorMessage("Failed to create or find launch configuration.");
+        return;
+      }
 
-      // Refresh the tree view
-      await provider.refresh();
-
-      vscode.window.showInformationMessage(`Added "${launchConfig.name}" as a local launch configuration.`);
+      await executeDebugLaunch(launchItem, provider, context);
     })
   );
 
@@ -682,6 +742,279 @@ export function activate(context: vscode.ExtensionContext) {
         await vscode.window.showNotebookDocument(notebook, { preview: false });
       } catch (error) {
         vscode.window.showErrorMessage(`Failed to open notebook: ${item.name}`);
+      }
+    })
+  );
+
+  // Helper function to find Python virtual environments
+  async function findPythonVenvs(): Promise<string[]> {
+    const venvs: string[] = [];
+    const workspaceFolders = vscode.workspace.workspaceFolders || [];
+    const home = os.homedir();
+
+    // Common venv locations
+    const searchPaths: string[] = [];
+
+    // Workspace folders
+    for (const folder of workspaceFolders) {
+      searchPaths.push(path.join(folder.uri.fsPath, '.venv'));
+      searchPaths.push(path.join(folder.uri.fsPath, 'venv'));
+      searchPaths.push(path.join(folder.uri.fsPath, 'env'));
+      searchPaths.push(path.join(folder.uri.fsPath, '.env'));
+    }
+
+    // Common system locations
+    if (process.platform === 'win32') {
+      searchPaths.push(path.join(home, '.virtualenvs'));
+    } else {
+      searchPaths.push(path.join(home, '.virtualenvs'));
+      searchPaths.push(path.join(home, '.pyenv', 'versions'));
+      searchPaths.push('/usr/local/bin');
+      searchPaths.push('/opt/homebrew/bin');
+    }
+
+    // Check each path
+    for (const searchPath of searchPaths) {
+      try {
+        if (fs.existsSync(searchPath)) {
+          const stat = fs.statSync(searchPath);
+          if (stat.isDirectory()) {
+            // Check if it's a venv (has bin/python or Scripts/python.exe)
+            const pythonPath = process.platform === 'win32' 
+              ? path.join(searchPath, 'Scripts', 'python.exe')
+              : path.join(searchPath, 'bin', 'python');
+            if (fs.existsSync(pythonPath)) {
+              venvs.push(searchPath);
+            } else {
+              // Check for subdirectories (like pyenv versions)
+              try {
+                const entries = fs.readdirSync(searchPath);
+                for (const entry of entries) {
+                  const entryPath = path.join(searchPath, entry);
+                  const entryStat = fs.statSync(entryPath);
+                  if (entryStat.isDirectory()) {
+                    const subPythonPath = process.platform === 'win32'
+                      ? path.join(entryPath, 'Scripts', 'python.exe')
+                      : path.join(entryPath, 'bin', 'python');
+                    if (fs.existsSync(subPythonPath)) {
+                      venvs.push(entryPath);
+                    }
+                  }
+                }
+              } catch {
+                // Ignore readdir errors
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
+
+    // Also check for conda environments
+    if (process.platform !== 'win32') {
+      const condaPath = path.join(home, 'anaconda3', 'envs');
+      if (fs.existsSync(condaPath)) {
+        try {
+          const entries = fs.readdirSync(condaPath);
+          for (const entry of entries) {
+            venvs.push(path.join(condaPath, entry));
+          }
+        } catch {
+          // Ignore errors
+        }
+      }
+    }
+
+    return venvs;
+  }
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("betterRun.attachVenv", async (arg: LaunchArg | TaskArg) => {
+      const launchItem = unwrapLaunch(arg as LaunchArg);
+      const taskItem = unwrapTask(arg as TaskArg);
+      
+      if (!launchItem && !taskItem) {
+        vscode.window.showErrorMessage("No launch or task selected.");
+        return;
+      }
+
+      const item = launchItem || taskItem;
+      const isPython = launchItem 
+        ? launchItem.config?.type === "python"
+        : taskItem?.userTask?.command?.includes("python") || false;
+
+      if (!isPython) {
+        vscode.window.showInformationMessage("Attach venv is only available for Python launches and tasks.");
+        return;
+      }
+
+      // Find available venvs
+      const venvs = await findPythonVenvs();
+      
+      if (venvs.length === 0) {
+        const customPath = await vscode.window.showInputBox({
+          prompt: "No virtual environments found. Enter the path to a Python virtual environment:",
+          placeHolder: "/path/to/venv"
+        });
+        if (!customPath) return;
+
+        const pythonPath = process.platform === 'win32'
+          ? path.join(customPath, 'Scripts', 'python.exe')
+          : path.join(customPath, 'bin', 'python');
+        
+        if (!fs.existsSync(pythonPath)) {
+          vscode.window.showErrorMessage(`Python executable not found at ${pythonPath}`);
+          return;
+        }
+
+        // Update the launch/task with the venv
+        if (launchItem) {
+          const config = vscode.workspace.getConfiguration("betterRun");
+          const currentLaunches = config.get<any[]>("userLaunches") || [];
+          const launchIndex = currentLaunches.findIndex((l: any) => 
+            l.name === launchItem.name && l.program === launchItem.config.program
+          );
+          
+          if (launchIndex >= 0) {
+            currentLaunches[launchIndex].python = pythonPath;
+            await config.update("userLaunches", currentLaunches, vscode.ConfigurationTarget.Global);
+            await provider.refresh();
+            vscode.window.showInformationMessage(`Attached venv to "${launchItem.name}"`);
+          }
+        }
+        return;
+      }
+
+      // Show quick pick for venv selection
+      const venvOptions = venvs.map(venv => ({
+        label: path.basename(venv),
+        description: venv,
+        venvPath: venv
+      }));
+
+      const selected = await vscode.window.showQuickPick(venvOptions, {
+        placeHolder: "Select a Python virtual environment"
+      });
+
+      if (!selected) return;
+
+      const pythonPath = process.platform === 'win32'
+        ? path.join(selected.venvPath, 'Scripts', 'python.exe')
+        : path.join(selected.venvPath, 'bin', 'python');
+
+      // Update the launch/task with the venv
+      if (launchItem) {
+        const config = vscode.workspace.getConfiguration("betterRun");
+        const currentLaunches = config.get<any[]>("userLaunches") || [];
+        const launchIndex = currentLaunches.findIndex((l: any) => 
+          l.name === launchItem.name && l.program === launchItem.config.program
+        );
+        
+        if (launchIndex >= 0) {
+          currentLaunches[launchIndex].python = pythonPath;
+          await config.update("userLaunches", currentLaunches, vscode.ConfigurationTarget.Global);
+          await provider.refresh();
+          vscode.window.showInformationMessage(`Attached venv to "${launchItem.name}"`);
+        } else {
+          vscode.window.showWarningMessage("Could not find launch in user settings. Only user settings launches can be modified.");
+        }
+      } else if (taskItem && taskItem.userTask) {
+        const config = vscode.workspace.getConfiguration("betterRun");
+        const currentTasks = config.get<any[]>("userTasks") || [];
+        const taskIndex = currentTasks.findIndex((t: any) => 
+          t.label === taskItem.label
+        );
+        
+        if (taskIndex >= 0) {
+          // Update task command to use the venv python
+          const originalCommand = currentTasks[taskIndex].command;
+          currentTasks[taskIndex].command = `"${pythonPath}" -m ${originalCommand.replace(/^python\s+-m\s+/, '').replace(/^python\s+/, '')}`;
+          await config.update("userTasks", currentTasks, vscode.ConfigurationTarget.Global);
+          await provider.refresh();
+          vscode.window.showInformationMessage(`Attached venv to "${taskItem.label}"`);
+        } else {
+          vscode.window.showWarningMessage("Could not find task in user settings. Only user settings tasks can be modified.");
+        }
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("betterRun.goToSettingsDefinition", async (arg: LaunchArg | TaskArg) => {
+      const launchItem = unwrapLaunch(arg as LaunchArg);
+      const taskItem = unwrapTask(arg as TaskArg);
+      
+      if (!launchItem && !taskItem) {
+        vscode.window.showErrorMessage("No launch or task selected.");
+        return;
+      }
+
+      const item = launchItem || taskItem;
+      const source = launchItem?.source || taskItem?.source;
+
+      if (!source) {
+        vscode.window.showErrorMessage("Could not find source for this item.");
+        return;
+      }
+
+      // If it's from user settings, open settings.json
+      if (source.isUserSettings && source.uri) {
+        try {
+          const document = await vscode.workspace.openTextDocument(source.uri);
+          await vscode.window.showTextDocument(document);
+          
+          // Try to find and highlight the item
+          const editor = vscode.window.activeTextEditor;
+          if (editor) {
+            const text = document.getText();
+            const searchName = launchItem ? launchItem.name : taskItem?.label;
+            if (searchName) {
+              const lines = text.split('\n');
+              for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes(`"${searchName}"`) || lines[i].includes(`'${searchName}'`)) {
+                  const position = new vscode.Position(i, 0);
+                  const range = new vscode.Range(position, position);
+                  editor.revealRange(range, vscode.TextEditorRevealType.Default);
+                  editor.selection = new vscode.Selection(position, position);
+                  break;
+                }
+              }
+            }
+          }
+        } catch (error) {
+          vscode.window.showErrorMessage(`Failed to open settings file: ${error}`);
+        }
+      } else if (source.uri) {
+        // For workspace files (launch.json, tasks.json), open the file
+        try {
+          const document = await vscode.workspace.openTextDocument(source.uri);
+          await vscode.window.showTextDocument(document);
+          
+          // Try to find and highlight the item
+          const searchName = launchItem ? launchItem.name : taskItem?.label;
+          if (searchName) {
+            const editor = vscode.window.activeTextEditor;
+            if (editor) {
+              const text = document.getText();
+              const lines = text.split('\n');
+              for (let i = 0; i < lines.length; i++) {
+                if (lines[i].includes(`"${searchName}"`) || lines[i].includes(`'${searchName}'`)) {
+                  const position = new vscode.Position(i, 0);
+                  const range = new vscode.Range(position, position);
+                  editor.revealRange(range, vscode.TextEditorRevealType.Default);
+                  editor.selection = new vscode.Selection(position, position);
+                  break;
+                }
+              }
+            }
+          }
+        } catch (error) {
+          vscode.window.showErrorMessage(`Failed to open definition file: ${error}`);
+        }
+      } else {
+        vscode.window.showInformationMessage("This item is from a built-in source and cannot be opened.");
       }
     })
   );

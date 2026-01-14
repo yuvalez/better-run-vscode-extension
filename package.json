@@ -135,9 +135,27 @@
         "category": "Better Run"
       },
       {
-        "command": "betterRun.addFileAsLaunch",
-        "title": "Add as Local Launch",
-        "icon": "$(add)",
+        "command": "betterRun.runFileAsLaunch",
+        "title": "Run File as Launch",
+        "icon": "$(play)",
+        "category": "Better Run"
+      },
+      {
+        "command": "betterRun.debugFileAsLaunch",
+        "title": "Debug File as Launch",
+        "icon": "$(debug-alt)",
+        "category": "Better Run"
+      },
+      {
+        "command": "betterRun.attachVenv",
+        "title": "Attach venv",
+        "icon": "$(link)",
+        "category": "Better Run"
+      },
+      {
+        "command": "betterRun.goToSettingsDefinition",
+        "title": "Go to Settings Definition",
+        "icon": "$(go-to-file)",
         "category": "Better Run"
       }
     ],
@@ -231,39 +249,39 @@
       ],
       "view/item/context": [
         {
-          "command": "betterRun.debugLaunch",
-          "when": "view == betterRun.runs && viewItem == betterRun.launch",
-          "group": "inline"
-        },
-        {
           "command": "betterRun.runLaunch",
           "when": "view == betterRun.runs && viewItem == betterRun.launch",
-          "group": "inline"
+          "group": "1_run"
+        },
+        {
+          "command": "betterRun.debugLaunch",
+          "when": "view == betterRun.runs && viewItem == betterRun.launch",
+          "group": "1_run"
         },
         {
           "command": "betterRun.runTask",
           "when": "view == betterRun.runs && viewItem == betterRun.task",
-          "group": "inline"
+          "group": "1_run"
         },
         {
-          "command": "betterRun.refresh",
-          "when": "view == betterRun.runs",
-          "group": "navigation"
+          "command": "betterRun.attachVenv",
+          "when": "view == betterRun.runs && (viewItem == betterRun.launch || viewItem == betterRun.task)",
+          "group": "2_venv"
         },
         {
-          "command": "betterRun.searchByName",
-          "when": "view == betterRun.runs",
-          "group": "navigation"
-        },
-        {
-          "command": "betterRun.clearSearch",
-          "when": "view == betterRun.runs",
-          "group": "navigation"
+          "command": "betterRun.goToSettingsDefinition",
+          "when": "view == betterRun.runs && (viewItem == betterRun.launch || viewItem == betterRun.task)",
+          "group": "3_settings"
         }
       ],
       "editor/title/context": [
         {
-          "command": "betterRun.addFileAsLaunch",
+          "command": "betterRun.runFileAsLaunch",
+          "when": "editorLangId != markdown && editorLangId != plaintext",
+          "group": "navigation"
+        },
+        {
+          "command": "betterRun.debugFileAsLaunch",
           "when": "editorLangId != markdown && editorLangId != plaintext",
           "group": "navigation"
         }
