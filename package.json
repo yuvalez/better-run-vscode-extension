@@ -249,6 +249,21 @@
       ],
       "view/item/context": [
         {
+          "command": "betterRun.debugLaunch",
+          "when": "view == betterRun.runs && viewItem == betterRun.launch",
+          "group": "inline"
+        },
+        {
+          "command": "betterRun.runLaunch",
+          "when": "view == betterRun.runs && viewItem == betterRun.launch",
+          "group": "inline"
+        },
+        {
+          "command": "betterRun.runTask",
+          "when": "view == betterRun.runs && viewItem == betterRun.task",
+          "group": "inline"
+        },
+        {
           "command": "betterRun.runLaunch",
           "when": "view == betterRun.runs && viewItem == betterRun.launch",
           "group": "1_run"
